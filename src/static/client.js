@@ -1,5 +1,3 @@
-
-import * as config from '../config';
 import * as mediasoup from 'mediasoup-client';
 import deepEqual from 'deep-equal';
 import debugModule from 'debug';
@@ -591,6 +589,8 @@ async function pollAndUpdate() {
   if (error) {
     return ({ error });
   }
+  console.log(peers)
+  console.log(activeSpeaker)
 
   // always update bandwidth stats and active speaker display
   currentActiveSpeaker = activeSpeaker;

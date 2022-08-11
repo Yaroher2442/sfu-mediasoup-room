@@ -4551,7 +4551,7 @@ var Client = (function (exports) {
 	        return this._handler;
 	    }
 	    /**
-	     * Connection state.
+	     * Sse state.
 	     */
 	    get connectionState() {
 	        return this._connectionState;
@@ -6119,7 +6119,7 @@ var Client = (function (exports) {
 	                    break;
 	                }
 	        }
-	        // Write the codec fmtp.config back.
+	        // Write the codec fmtp.configold back.
 	        fmtp.config = '';
 	        for (const key of Object.keys(parameters)) {
 	            if (fmtp.config)

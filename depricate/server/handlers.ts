@@ -8,8 +8,9 @@ const log = debugModule(`${config.appName}`);
 const warn = debugModule(`${config.appName}:WARN`);
 const err = debugModule(`${config.appName}:ERROR`);
 
-export const syncData = async (req: Request, res: Response) =>{
-    let { peerId } = req.body;
+
+export const syncData = async (req: Request, res: Response) => {
+    let {peerId} = req.body;
     try {
         // make sure this peer is connected. if we've disconnected the
         // peer because of a network outage we want the peer to know that
@@ -20,6 +21,12 @@ export const syncData = async (req: Request, res: Response) =>{
 
         // update our most-recently-seem timestamp -- we're not stale!
         mediaLayer.peers.get(peerId)!.lastSeenTs = Date.now();
+        const resp = {
+            peers: mediaLayer.peers,
+            activeSpeaker: mediaLayer.activeSpeaker
+        }
+        console.log(resp)
+        console.log(typeof resp.peers.get(peerId)!.media)
 
         res.send({
             peers: mediaLayer.peers,
@@ -27,7 +34,7 @@ export const syncData = async (req: Request, res: Response) =>{
         });
     } catch ({message}) {
         console.error(message);
-        res.send({ error: message });
+        res.send({error: message});
     }
 }
 

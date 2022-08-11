@@ -43,7 +43,7 @@ export class Server {
         } catch (e) {
             // @ts-ignore
             if (e.code === 'ENOENT') {
-                console.error('no certificates found (check config.js)');
+                console.error('no certificates found (check configold.js)');
                 console.error('  could not start https server ... trying http');
             } else {
                 console.error('could not start https server', e);

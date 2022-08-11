@@ -1,13 +1,4 @@
 "use strict";
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.resumeProducer = exports.pauseProducer = exports.consumerSetLayers = exports.closeConsumer = exports.resumeConsumer = exports.pauseConsumer = exports.receiveTrack = exports.sendTrack = exports.closeProducer = exports.closeTransport = exports.connectTransport = exports.createTransport = exports.joinNewPeer = exports.peerLeave = exports.syncData = void 0;
 const index_1 = require("../index");
@@ -16,7 +7,7 @@ const debugModule = require('debug');
 const log = debugModule(`${config.appName}`);
 const warn = debugModule(`${config.appName}:WARN`);
 const err = debugModule(`${config.appName}:ERROR`);
-const syncData = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const syncData = async (req, res) => {
     let { peerId } = req.body;
     try {
         // make sure this peer is connected. if we've disconnected the
@@ -27,6 +18,12 @@ const syncData = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         }
         // update our most-recently-seem timestamp -- we're not stale!
         index_1.mediaLayer.peers.get(peerId).lastSeenTs = Date.now();
+        const resp = {
+            peers: index_1.mediaLayer.peers,
+            activeSpeaker: index_1.mediaLayer.activeSpeaker
+        };
+        console.log(resp);
+        console.log(typeof resp.peers.get(peerId).media);
         res.send({
             peers: index_1.mediaLayer.peers,
             activeSpeaker: index_1.mediaLayer.activeSpeaker
@@ -36,22 +33,22 @@ const syncData = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
         console.error(message);
         res.send({ error: message });
     }
-});
+};
 exports.syncData = syncData;
-const peerLeave = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const peerLeave = async (req, res) => {
     try {
         let { peerId } = req.body;
         log('leave', peerId);
-        yield index_1.mediaLayer.closePeer(peerId);
+        await index_1.mediaLayer.closePeer(peerId);
         res.send({ left: true });
     }
     catch (e) {
         console.error('error in /signaling/leave', e);
         res.send({ error: e });
     }
-});
+};
 exports.peerLeave = peerLeave;
-const joinNewPeer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const joinNewPeer = async (req, res) => {
     try {
         let { peerId } = req.body, now = Date.now();
         log('join-as-new-peer', peerId);
@@ -68,13 +65,13 @@ const joinNewPeer = (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         console.error('error in /signaling/join-as-new-peer', e);
         res.send({ error: e });
     }
-});
+};
 exports.joinNewPeer = joinNewPeer;
-const createTransport = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const createTransport = async (req, res) => {
     try {
         let { peerId, direction } = req.body;
         log('create-transport', peerId, direction);
-        let transport = yield index_1.mediaLayer.createWebRtcTransport(peerId, direction);
+        let transport = await index_1.mediaLayer.createWebRtcTransport(peerId, direction);
         index_1.mediaLayer.transports.set(transport.id, transport);
         let { id, iceParameters, iceCandidates, dtlsParameters } = transport;
         res.send({
@@ -85,9 +82,9 @@ const createTransport = (req, res) => __awaiter(void 0, void 0, void 0, function
         console.error('error in createTransport', e);
         res.send({ error: e });
     }
-});
+};
 exports.createTransport = createTransport;
-const connectTransport = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const connectTransport = async (req, res) => {
     try {
         let { peerId, transportId, dtlsParameters } = req.body, transport = index_1.mediaLayer.transports.get(transportId);
         if (!transport) {
@@ -96,16 +93,16 @@ const connectTransport = (req, res) => __awaiter(void 0, void 0, void 0, functio
             return;
         }
         log('connect-transport', peerId, transport.appData);
-        yield transport.connect({ dtlsParameters });
+        await transport.connect({ dtlsParameters });
         res.send({ connected: true });
     }
     catch (e) {
         console.error('error in /signaling/connect-transport', e);
         res.send({ error: e });
     }
-});
+};
 exports.connectTransport = connectTransport;
-const closeTransport = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const closeTransport = async (req, res) => {
     try {
         let { peerId, transportId } = req.body, transport = index_1.mediaLayer.transports.get(transportId);
         if (!transport) {
@@ -114,7 +111,7 @@ const closeTransport = (req, res) => __awaiter(void 0, void 0, void 0, function*
             return;
         }
         log('close-transport', peerId, transport.appData);
-        yield index_1.mediaLayer.closeTransport(transport);
+        await index_1.mediaLayer.closeTransport(transport);
         res.send({ closed: true });
     }
     catch (e) {
@@ -122,9 +119,9 @@ const closeTransport = (req, res) => __awaiter(void 0, void 0, void 0, function*
         // @ts-ignore
         res.send({ error: e.message });
     }
-});
+};
 exports.closeTransport = closeTransport;
-const closeProducer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const closeProducer = async (req, res) => {
     try {
         let { peerId, producerId } = req.body, producer = index_1.mediaLayer.producers.find((p) => p.id === producerId);
         if (!producer) {
@@ -133,7 +130,7 @@ const closeProducer = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             return;
         }
         log('close-producer', peerId, producer.appData);
-        yield index_1.mediaLayer.closeProducer(producer);
+        await index_1.mediaLayer.closeProducer(producer);
         res.send({ closed: true });
     }
     catch (e) {
@@ -141,9 +138,9 @@ const closeProducer = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         // @ts-ignore
         res.send({ error: e.message });
     }
-});
+};
 exports.closeProducer = closeProducer;
-const sendTrack = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const sendTrack = async (req, res) => {
     try {
         let { peerId, transportId, kind, rtpParameters, paused = false, appData } = req.body, transport = index_1.mediaLayer.transports.get(transportId);
         if (!transport) {
@@ -151,11 +148,11 @@ const sendTrack = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
             res.send({ error: `server-side transport ${transportId} not found` });
             return;
         }
-        let producer = yield transport.produce({
+        let producer = await transport.produce({
             kind,
             rtpParameters,
             paused,
-            appData: Object.assign(Object.assign({}, appData), { peerId, transportId })
+            appData: { ...appData, peerId, transportId }
         });
         // if our associated transport closes, close ourself, too
         producer.on('transportclose', () => {
@@ -177,9 +174,9 @@ const sendTrack = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     }
     catch (e) {
     }
-});
+};
 exports.sendTrack = sendTrack;
-const receiveTrack = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const receiveTrack = async (req, res) => {
     try {
         let { peerId, mediaPeerId, mediaTag, rtpCapabilities } = req.body;
         let producer = index_1.mediaLayer.producers.find((p) => p.appData.mediaTag === mediaTag &&
@@ -207,7 +204,7 @@ const receiveTrack = (req, res) => __awaiter(void 0, void 0, void 0, function* (
             res.send({ error: msg });
             return;
         }
-        let consumer = yield transport.consume({
+        let consumer = await transport.consume({
             producerId: producer.id,
             rtpCapabilities,
             paused: true,
@@ -254,9 +251,9 @@ const receiveTrack = (req, res) => __awaiter(void 0, void 0, void 0, function* (
         console.error('error in /signaling/recv-track', e);
         res.send({ error: e });
     }
-});
+};
 exports.receiveTrack = receiveTrack;
-const pauseConsumer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const pauseConsumer = async (req, res) => {
     try {
         let { peerId, consumerId } = req.body, consumer = index_1.mediaLayer.consumers.find((c) => c.id === consumerId);
         if (!consumer) {
@@ -265,16 +262,16 @@ const pauseConsumer = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             return;
         }
         log('pause-consumer', consumer.appData);
-        yield consumer.pause();
+        await consumer.pause();
         res.send({ paused: true });
     }
     catch (e) {
         console.error('error in /signaling/pause-consumer', e);
         res.send({ error: e });
     }
-});
+};
 exports.pauseConsumer = pauseConsumer;
-const resumeConsumer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const resumeConsumer = async (req, res) => {
     try {
         let { peerId, consumerId } = req.body, consumer = index_1.mediaLayer.consumers.find((c) => c.id === consumerId);
         if (!consumer) {
@@ -283,16 +280,16 @@ const resumeConsumer = (req, res) => __awaiter(void 0, void 0, void 0, function*
             return;
         }
         log('resume-consumer', consumer.appData);
-        yield consumer.resume();
+        await consumer.resume();
         res.send({ resumed: true });
     }
     catch (e) {
         console.error('error in /signaling/resume-consumer', e);
         res.send({ error: e });
     }
-});
+};
 exports.resumeConsumer = resumeConsumer;
-const closeConsumer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const closeConsumer = async (req, res) => {
     try {
         let { peerId, consumerId } = req.body, consumer = index_1.mediaLayer.consumers.find((c) => c.id === consumerId);
         if (!consumer) {
@@ -300,16 +297,16 @@ const closeConsumer = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             res.send({ error: `server-side consumer ${consumerId} not found` });
             return;
         }
-        yield index_1.mediaLayer.closeConsumer(consumer);
+        await index_1.mediaLayer.closeConsumer(consumer);
         res.send({ closed: true });
     }
     catch (e) {
         console.error('error in /signaling/close-consumer', e);
         res.send({ error: e });
     }
-});
+};
 exports.closeConsumer = closeConsumer;
-const consumerSetLayers = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const consumerSetLayers = async (req, res) => {
     try {
         let { peerId, consumerId, spatialLayer } = req.body, consumer = index_1.mediaLayer.consumers.find((c) => c.id === consumerId);
         if (!consumer) {
@@ -318,16 +315,16 @@ const consumerSetLayers = (req, res) => __awaiter(void 0, void 0, void 0, functi
             return;
         }
         log('consumer-set-layers', spatialLayer, consumer.appData);
-        yield consumer.setPreferredLayers({ spatialLayer });
+        await consumer.setPreferredLayers({ spatialLayer });
         res.send({ layersSet: true });
     }
     catch (e) {
         console.error('error in /signaling/consumer-set-layers', e);
         res.send({ error: e });
     }
-});
+};
 exports.consumerSetLayers = consumerSetLayers;
-const pauseProducer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const pauseProducer = async (req, res) => {
     try {
         let { peerId, producerId } = req.body, producer = index_1.mediaLayer.producers.find((p) => p.id === producerId);
         if (!producer) {
@@ -336,7 +333,7 @@ const pauseProducer = (req, res) => __awaiter(void 0, void 0, void 0, function* 
             return;
         }
         log('pause-producer', producer.appData);
-        yield producer.pause();
+        await producer.pause();
         index_1.mediaLayer.peers.get(peerId).media.get(producer.appData.mediaTag).paused = true;
         res.send({ paused: true });
     }
@@ -344,9 +341,9 @@ const pauseProducer = (req, res) => __awaiter(void 0, void 0, void 0, function* 
         console.error('error in /signaling/pause-producer', e);
         res.send({ error: e });
     }
-});
+};
 exports.pauseProducer = pauseProducer;
-const resumeProducer = (req, res) => __awaiter(void 0, void 0, void 0, function* () {
+const resumeProducer = async (req, res) => {
     try {
         let { peerId, producerId } = req.body, producer = index_1.mediaLayer.producers.find((p) => p.id === producerId);
         if (!producer) {
@@ -355,7 +352,7 @@ const resumeProducer = (req, res) => __awaiter(void 0, void 0, void 0, function*
             return;
         }
         log('resume-producer', producer.appData);
-        yield producer.resume();
+        await producer.resume();
         index_1.mediaLayer.peers.get(peerId).media.get(producer.appData.mediaTag).paused = false;
         res.send({ resumed: true });
     }
@@ -363,5 +360,5 @@ const resumeProducer = (req, res) => __awaiter(void 0, void 0, void 0, function*
         console.error('error in /signaling/resume-producer', e);
         res.send({ error: e });
     }
-});
+};
 exports.resumeProducer = resumeProducer;
