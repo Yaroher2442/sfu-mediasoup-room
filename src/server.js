@@ -3,7 +3,8 @@ const mediasoup = require('mediasoup');
 const express = require('express');
 const https = require('https');
 const fs = require('fs');
-
+const Room = require("./layer/room")
+const {formatWithOptions} = require("util");
 
 let httpsServer;
 
@@ -76,10 +77,38 @@ const roomState = {
 // main() -- our execution entry point
 //
 
-class Server {
-    expressApp = express();
+class MediaApp {
+    worker
+    rooms
 
     constructor() {
+        this.rooms = {}
+    }
+
+    async createWorker() {
+        this.worker = await mediasoup.createWorker({
+            logLevel: config.mediasoup.worker.logLevel,
+            logTags: config.mediasoup.worker.logTags,
+            rtcMinPort: config.mediasoup.worker.rtcMinPort,
+            rtcMaxPort: config.mediasoup.worker.rtcMaxPort,
+        });
+        this.worker.on('died', this.onWorkerDie)
+    }
+
+    onWorkerDie() {
+        console.error('mediasoup worker died (this should never happen)');
+        process.exit(1);
+    }
+}
+
+
+class Server {
+    expressApp = express();
+    mediaApp
+
+    constructor(mediaApp) {
+        this.mediaApp = mediaApp
+        this.expressApp.set()
         this.expressApp.use(express.json({type: '*/*'}));
         this.expressApp.use(express.static("./src/static"));
         this.addRoutes()
@@ -132,84 +161,6 @@ class Server {
     }
 }
 
-class MediaApp {
-    worker
-
-    constructor() {
-    }
-
-    async createWorker() {
-        this.worker = await mediasoup.createWorker({
-            logLevel: config.mediasoup.worker.logLevel,
-            logTags: config.mediasoup.worker.logTags,
-            rtcMinPort: config.mediasoup.worker.rtcMinPort,
-            rtcMaxPort: config.mediasoup.worker.rtcMaxPort,
-        });
-        this.worker.on('died', this.onWorkerDie)
-    }
-
-    onWorkerDie() {
-        console.error('mediasoup worker died (this should never happen)');
-        process.exit(1);
-    }
-}
-
-class Peer {
-    joinTs = null
-    lastSeenTs = null
-    media = {}
-    consumerLayers = {}
-    stats = {}
-
-    constructor(peerId) {
-        this.joinTs = Date.now()
-        this.lastSeenTs = Date.now()
-        this.media = {}
-        this.consumerLayers = {}
-        this.stats = {}
-    }
-}
-
-class Room {
-    peers = {}
-    router = null
-    audioLevelObserver = null
-    activeSpeaker = {producerId: null, volume: null, peerId: null}
-
-    async createRouterAndObserver(router) {
-        this.router = router
-
-        this.audioLevelObserver = await router.createAudioLevelObserver({
-            interval: 800
-        });
-        this.audioLevelObserver.on('volumes', this.audioObserverOnVolumes)
-        this.audioLevelObserver.on('silence', this.audioObserverOnSilence)
-    }
-
-    audioObserverOnVolumes(volumes) {
-        const {producer, volume} = volumes[0];
-        console.log('audio-level volumes event', producer.appData.peerId, volume);
-        this.activeSpeaker.producerId = producer.id;
-        this.activeSpeaker.volume = volume;
-        this.activeSpeaker.peerId = producer.appData.peerId;
-    }
-
-    audioObserverOnSilence() {
-        console.log('audio-level silence event');
-        this.activeSpeaker.producerId = null;
-        this.activeSpeaker.volume = null;
-        this.activeSpeaker.peerId = null;
-    }
-
-
-    async join(peerId) {
-        this.peers[peerId] = new Peer()
-    }
-
-    async leave(peerId) {
-        delete this.peers[peerId]
-    }
-}
 
 mediaApp = new MediaApp();
 
@@ -218,7 +169,6 @@ async function main() {
     console.log('starting mediasoup');
     ({worker, router, audioLevelObserver} = await startMediasoup());
 
-    let mediaApp = new MediaApp();
 
     // await mediaApp.createWorker();
     // worker = mediaApp.worker;
@@ -228,7 +178,7 @@ async function main() {
     // await room.createRouterAndObserver(router)
     // audioLevelObserver = router.audioLevelObserver
 
-    server = new Server();
+    let server = new Server();
     // start https server, falling back to http if https fails
     console.log('starting express');
     await server.run()
