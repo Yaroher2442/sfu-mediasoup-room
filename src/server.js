@@ -55,28 +55,8 @@ class Server {
         this.expressApp.set("mediaApp", mediaApp)
         this.expressApp.use(express.json({type: '*/*'}));
         this.expressApp.use(express.static("./src/static"));
-        this.addRoutes()
-    }
-
-    addRoutes() {
-        // this.expressApp.post('/signaling/sync', sync);
-        // this.expressApp.post('/signaling/join-as-new-peer', join);
-        // this.expressApp.post('/signaling/leave', leave);
-        // this.expressApp.post('/signaling/create-transport', crateNewTransport);
-        // this.expressApp.post('/signaling/connect-transport', connectTransport);
-        // this.expressApp.post('/signaling/close-transport', closeRouteTransport)
-        // this.expressApp.post('/signaling/close-producer', closeRouteProducer);
-        // this.expressApp.post('/signaling/send-track', sentTrack);
-        // this.expressApp.post('/signaling/recv-track', receiveTrack);
-        // this.expressApp.post('/signaling/pause-consumer', pauseConsumer);
-        // this.expressApp.post('/signaling/resume-consumer', resumeConsumer);
-        // this.expressApp.post('/signaling/close-consumer', closeRouteConsumer)
-        // this.expressApp.post('/signaling/consumer-set-layers', consumerSetLayers);
-        // this.expressApp.post('/signaling/pause-producer', pauseProducer);
-        // this.expressApp.post('/signaling/resume-producer', resumeProducer);
         this.expressApp.post('/signaling/:method', this.invokeMethod)
     }
-
     async invokeMethod(req, res) {
         console.log(`exec command ${req.params.method}`)
         let mediaApp = req.app.get("mediaApp")
