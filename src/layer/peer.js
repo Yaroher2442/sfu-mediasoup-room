@@ -33,14 +33,14 @@ class Peer {
     }
 
     async close() {
-        for (let [id, transport] of Object.entries(this.transports)) {
+        for (let transport of Object.values(this.transports)) {
             await this._closeTransportObject(transport)
         }
     }
 
 
 
-    async updateStatus() {
+    async updateStats() {
         for (let producer of this.producers) {
             if (producer.kind !== 'video') {
                 continue;
@@ -67,7 +67,7 @@ class Peer {
     }
 
     // TRANSPORTS
-    async _findTransport(transportId) {
+    _findTransport(transportId) {
         let transport = this.transports[transportId]
         if (!transport) {
             console.error(`connect-transport: server-side transport ${transportId} not found`);
@@ -126,13 +126,13 @@ class Peer {
         // called by a client that wants to close a single transport (for
         // example, a client that is no longer sending any media).
         //
-        let transport = this._findTransport()
+        let transport = this._findTransport(transportId)
         await this._closeTransportObject(transport);
         return {closed: true}
     }
 
     // PRODUCERS
-    async _findProducer(producerId) {
+    _findProducer(producerId) {
         let producer = this.producers.find((p) => p.id === producerId);
         if (!producer) {
             console.error(`close-producer: server-side producer ${producerId} not found`);
@@ -187,7 +187,7 @@ class Peer {
     }
 
     // CONSUMER
-    async _findConsumer(consumerId) {
+    _findConsumer(consumerId) {
         let consumer = this.consumers.find((p) => p.id === consumerId);
         if (!consumer) {
             console.error(`close-producer: server-side producer ${consumerId} not found`);
@@ -274,7 +274,7 @@ class Peer {
         return {id: producer.id}
     }
 
-    async receiveTrack(peerId, mediaPeerId, mediaTag, rtpCapabilities) {
+    async receiveTrack(mediaPeerId, mediaTag, rtpCapabilities) {
         // --> /signaling/recv-track
         //
         // create a mediasoup consumer object, hook it up to a producer here
@@ -282,7 +282,12 @@ class Peer {
         // object on the client side. always start consumers paused. client
         // will request media to resume when the connection completes
         //
-        let producer = this.producers.find((p) => p.appData.mediaTag === mediaTag && p.appData.peerId === mediaPeerId);
+        this.producers.forEach((pr)=>{
+            console.log(pr.appData)
+
+        })
+
+        let producer = this.producers.find((p) => p.appData.mediaTag === mediaTag && p.appData.peerId === this.id);
         if (!producer) {
             let msg = 'server-side producer for ' + `${mediaPeerId}:${mediaTag} not found`;
             throw Error('recv-track: ' + msg)
@@ -291,19 +296,19 @@ class Peer {
             producerId: producer.id, rtpCapabilities
         })) {
             let msg = `client cannot consume ${mediaPeerId}:${mediaTag}`;
-            throw Error(`recv-track: ${peerId} ${msg}`)
+            throw Error(`recv-track: ${this.id} ${msg}`)
         }
 
-        let transport = Object.values(this.transports).find((t) => t.appData.peerId === peerId && t.appData.clientDirection === 'recv');
+        let transport = Object.values(this.transports).find((t) => t.appData.peerId === this.id && t.appData.clientDirection === 'recv');
         if (!transport) {
-            let msg = `server-side recv transport for ${peerId} not found`;
+            let msg = `server-side recv transport for ${this.id} not found`;
             throw Error('recv-track: ' + msg)
         }
         let consumer = await transport.consume({
             producerId: producer.id, rtpCapabilities, paused: true, // see note above about always starting paused
-            appData: {peerId, mediaPeerId, mediaTag}
+            appData: {peerId:this.id, mediaPeerId, mediaTag}
         });
-        consumer.on('transportclose', () => {
+        consumer.on('transportclose', () =>  {
             console.log(`consumer's transport closed`, consumer.id);
             this._closeConsumerObject(consumer);
         });
@@ -316,7 +321,7 @@ class Peer {
             currentLayer: null, clientSelectedLayer: null
         };
         consumer.on('layerschange', (layers) => {
-            console.log(`consumer layerschange ${mediaPeerId}->${peerId}`, mediaTag, layers);
+            console.log(`consumer layerschange ${mediaPeerId}->${this.id}`, mediaTag, layers);
             if (this.consumerLayers[consumer.id]) {
                 this.consumerLayers[consumer.id].currentLayer = layers && layers.spatialLayer;
             }

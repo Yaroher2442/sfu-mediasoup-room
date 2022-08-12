@@ -43,7 +43,7 @@ class Room {
     }
 
     async addProducerToAudioObserver(producerId) {
-        await this.audioLevelObserver.addProducer({producerId: producer.id})
+        await this.audioLevelObserver.addProducer({producerId: producerId})
     }
 
     async syncRemotePeer(peerId) {
@@ -73,7 +73,7 @@ class Room {
         // transport that the peer will use for receiving media. returns
         // router rtpCapabilities for mediasoup-client device initialization
         //
-        if (this.peers[peerId]){
+        if (this.peers[peerId]) {
             throw Error("Already in room")
         }
         this.peers[peerId] = new Peer(peerId, this)
@@ -87,6 +87,9 @@ class Room {
         // all associated mediasoup objects
         //
         let peer = this.peers[peerId]
+        if (!peer){
+            throw Error("peer not found")
+        }
         await peer.close()
         delete this.peers[peerId]
         return {left: true}
@@ -109,7 +112,7 @@ class Room {
         // })
         if (this.peers) {
             for (let {id, peer} of Object.entries(this.peers)) {
-                await peer.updatePeerStats();
+                await peer.updateStats();
             }
         }
 
