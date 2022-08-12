@@ -1,4 +1,5 @@
 const Peer = require("./peer")
+const config = require("../config");
 
 class Room {
     peers = {}
@@ -26,12 +27,96 @@ class Room {
         })
     }
 
+    async createWebRtcTransport({peerId, direction}) {
+        const {
+            listenIps, initialAvailableOutgoingBitrate
+        } = config.mediasoup.webRtcTransport;
+
+        return await this.router.createWebRtcTransport({
+            listenIps: listenIps,
+            enableUdp: true,
+            enableTcp: true,
+            preferUdp: true,
+            initialAvailableOutgoingBitrate: initialAvailableOutgoingBitrate,
+            appData: {peerId, clientDirection: direction}
+        });
+    }
+
+    async addProducerToAudioObserver(producerId) {
+        await this.audioLevelObserver.addProducer({producerId: producer.id})
+    }
+
+    async syncRemotePeer(peerId) {
+        // --> /signaling/sync
+        //
+        // client polling endpoint. send back our 'peers' data structure and
+        // 'activeSpeaker' info
+        //
+        if (!this.peers[peerId]) {
+            throw new Error('not connected');
+        }
+        // update our most-recently-seem timestamp -- we're not stale!
+        this.peers[peerId].lastSeenTs = Date.now();
+        let dumpedPeers = {}
+        Object.values(this.peers).forEach((peer) => {
+            dumpedPeers[peer.id] = peer.dumpSyncStatus();
+        })
+        return {
+            peers: dumpedPeers, activeSpeaker: this.activeSpeaker
+        }
+    }
+
     async join(peerId) {
-        this.peers[peerId] = new Peer()
+        // --> /signaling/join-as-new-peer
+        //
+        // adds the peer to the roomState data structure and creates a
+        // transport that the peer will use for receiving media. returns
+        // router rtpCapabilities for mediasoup-client device initialization
+        //
+        if (this.peers[peerId]){
+            throw Error("Already in room")
+        }
+        this.peers[peerId] = new Peer(peerId, this)
+        return {routerRtpCapabilities: this.router.rtpCapabilities}
     }
 
     async leave(peerId) {
+        // --> /signaling/leave
+        //
+        // removes the peer from the roomState data structure and and closes
+        // all associated mediasoup objects
+        //
+        let peer = this.peers[peerId]
+        await peer.close()
         delete this.peers[peerId]
+        return {left: true}
+    }
+
+    async deleteTimeOutedPeers() {
+        let now = Date.now();
+        Object.entries(this.peers).forEach(([id, p]) => {
+            if ((now - p.lastSeenTs) > config.httpPeerStale) {
+                console.log(`removing stale peer ${id}`);
+                p.close(id);
+                delete this.peers[p.id]
+            }
+        });
+    }
+
+    async updatePeerStats() {
+        // Object.entries(this.peers).forEach(([idpeer])=>{
+        //     await peer.updatePeerStats();
+        // })
+        if (this.peers) {
+            for (let {id, peer} of Object.entries(this.peers)) {
+                await peer.updatePeerStats();
+            }
+        }
+
+    }
+
+    findPeer(peerId) {
+        return this.peers[peerId]
     }
 }
 

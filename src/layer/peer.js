@@ -1,16 +1,334 @@
 class Peer {
+    id
+    transports
+    producers
+    consumers
     joinTs = null
     lastSeenTs = null
     media = {}
     consumerLayers = {}
     stats = {}
 
-    constructor(peerId) {
+    dumpSyncStatus() {
+        return {
+            joinTs: this.joinTs,
+            lastSeenTs: this.lastSeenTs,
+            media: this.media,
+            consumerLayers: this.consumerLayers,
+            stats: this.stats
+        }
+    }
+
+    constructor(peerId, room) {
+        this.id = peerId
+        this.room = room
         this.joinTs = Date.now()
         this.lastSeenTs = Date.now()
         this.media = {}
         this.consumerLayers = {}
         this.stats = {}
+        this.transports = {}
+        this.producers = []
+        this.consumers = []
+    }
+
+    async close() {
+        for (let [id, transport] of Object.entries(this.transports)) {
+            await this._closeTransportObject(transport)
+        }
+    }
+
+
+
+    async updateStatus() {
+        for (let producer of this.producers) {
+            if (producer.kind !== 'video') {
+                continue;
+            }
+            try {
+                let stats = await producer.getStats()
+                this.stats[producer.id] = stats.map((s) => ({
+                    bitrate: s.bitrate, fractionLost: s.fractionLost, jitter: s.jitter, score: s.score, rid: s.rid
+                }));
+            } catch (e) {
+                console.log('error while updating producer stats', e);
+            }
+        }
+        for (let consumer of this.consumers) {
+            try {
+                let stats = (await consumer.getStats()).find((s) => s.type === 'outbound-rtp')
+                this.stats[consumer.id] = [{
+                    bitrate: stats.bitrate, fractionLost: stats.fractionLost, score: stats.score
+                }]
+            } catch (e) {
+                console.log('error while updating consumer stats', e);
+            }
+        }
+    }
+
+    // TRANSPORTS
+    async _findTransport(transportId) {
+        let transport = this.transports[transportId]
+        if (!transport) {
+            console.error(`connect-transport: server-side transport ${transportId} not found`);
+            throw Error(`server-side transport ${transportId} not found`)
+
+        }
+        return transport
+    }
+
+    async _closeTransportObject(transport) {
+        try {
+            console.log('closeTransport()', transport.id, transport.appData);
+
+            // our producer and consumer event handlers will take care of
+            // calling closeProducer() and closeConsumer() on all the producers
+            // and consumers associated with this transport
+            await transport.close();
+
+            // so all we need to do, after we call transport.close(), is update
+            // our roomState data structure
+            delete this.transports[transport.id];
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
+    async crateNewTransport(direction) {
+        // --> /signaling/create-transport
+        //
+        // create a mediasoup transport object and send back info needed
+        // to create a transport object on the client side
+        //
+        let transport = await this.room.createWebRtcTransport({peerId: this.id, direction});
+        this.transports[transport.id] = transport;
+
+        let {id, iceParameters, iceCandidates, dtlsParameters} = transport;
+        return {
+            transportOptions: {id, iceParameters, iceCandidates, dtlsParameters}
+        }
+    }
+
+    async connectTransport(transportId, dtlsParameters) {
+        // --> /signaling/connect-transport
+        //
+        // called from inside a client's `transport.on('connect')` event
+        // handler.
+        //
+        let transport = this._findTransport(transportId)
+        await transport.connect({dtlsParameters});
+        return {connected: true}
+    }
+
+    async closeTransport(transportId) {
+        // --> /signaling/close-transport
+        //
+        // called by a client that wants to close a single transport (for
+        // example, a client that is no longer sending any media).
+        //
+        let transport = this._findTransport()
+        await this._closeTransportObject(transport);
+        return {closed: true}
+    }
+
+    // PRODUCERS
+    async _findProducer(producerId) {
+        let producer = this.producers.find((p) => p.id === producerId);
+        if (!producer) {
+            console.error(`close-producer: server-side producer ${producerId} not found`);
+            throw Error(`server-side producer ${producerId} not found`)
+        }
+        return producer
+    }
+
+    async _closeProducerObject(producer) {
+        try {
+            await producer.close();
+            // remove this producer from our roomState.producers list
+            this.producers = this.producers
+                .filter((p) => p.id !== producer.id);
+
+            // remove this track's info from our roomState...mediaTag bookkeeping
+            if (producer.appData.peerId) {
+                delete (this.media[producer.appData.mediaTag]);
+            }
+        } catch (e) {
+            console.error(e);
+            throw e;
+        }
+    }
+
+    async closeProducer(producerId) {
+        // --> /signaling/close-producer
+        //
+        // called by a client that is no longer sending a specific track
+        //
+        let producer = this._findProducer(producerId);
+        await this._closeProducerObject(producer);
+        return {closed: true}
+    }
+
+    async pauseProducer(producerId) {
+        // --> /signaling/pause-producer
+        //
+        // called to stop sending a track from a specific client
+        //
+        let producer = this._findProducer(producerId)
+        await producer.pause();
+        this.media[producer.appData.mediaTag].paused = true;
+        return {paused: true}
+    }
+
+    async resumeProducer(producerId) {
+        let producer = this._findProducer(producerId)
+        await producer.resume();
+        this.media[producer.appData.mediaTag].paused = false;
+        return {resumed: true}
+    }
+
+    // CONSUMER
+    async _findConsumer(consumerId) {
+        let consumer = this.consumers.find((p) => p.id === consumerId);
+        if (!consumer) {
+            console.error(`close-producer: server-side producer ${consumerId} not found`);
+            throw Error(`server-side producer ${consumerId} not found`)
+        }
+        return consumer
+    }
+
+    async _closeConsumerObject(consumer) {
+        await consumer.close();
+
+        // remove this consumer from our roomState.consumers list
+        this.consumers = this.consumers.filter((c) => c.id !== consumer.id);
+
+        // remove layer info from from our roomState...consumerLayers bookkeeping
+        if (consumer.appData.peerId) {
+            delete this.consumerLayers[consumer.id];
+        }
+    }
+
+    async pauseConsumer(consumerId) {
+        // --> /signaling/pause-consumer
+        //
+        // called to pause receiving a track for a specific client
+        //
+        let consumer = this._findConsumer(consumerId)
+        await consumer.pause();
+        return {paused: true}
+    }
+
+    async resumeConsumer(consumerId) {
+        // --> /signaling/resume-consumer
+        //
+        // called to resume receiving a track for a specific client
+        //
+        let consumer = this._findConsumer(consumerId)
+        await consumer.resume();
+        return {resumed: true}
+    }
+
+    async closeConsumer(consumerId) {
+        // --> /signalign/close-consumer
+        //
+        // called to stop receiving a track for a specific client. close and
+        // clean up consumer object
+        //
+        let consumer = this._findConsumer(consumerId)
+        await this._closeConsumerObject(consumer);
+        return {closed: true}
+    }
+
+    async consumerSetLayers(consumerId, spatialLayer) {
+        // --> /signaling/consumer-set-layers
+        //
+        // called to set the largest spatial layer that a specific client
+        // wants to receive
+        //
+        let consumer = this._findConsumer(consumerId)
+        await consumer.setPreferredLayers({spatialLayer});
+        return {layersSet: true}
+    }
+
+    // TRACKS
+    async sentTrack(transportId, kind, rtpParameters, paused = false, appData) {
+        // --> /signaling/send-track
+        //
+        // called from inside a client's `transport.on('produce')` event handler.
+        //
+        let transport = this._findTransport(transportId)
+        let producer = await transport.produce({
+            kind, rtpParameters, paused, appData: {...appData, peerId: this.id, transportId}
+        });
+        producer.on('transportclose', () => {
+            this._closeProducerObject(producer);
+        });
+        if (producer.kind === 'audio') {
+            await this.room.addProducerToAudioObserver(producer.id)
+            // audioLevelObserver.addProducer({producerId: producer.id});
+        }
+        this.producers.push(producer);
+        this.media[appData.mediaTag] = {
+            paused, encodings: rtpParameters.encodings
+        };
+        return {id: producer.id}
+    }
+
+    async receiveTrack(peerId, mediaPeerId, mediaTag, rtpCapabilities) {
+        // --> /signaling/recv-track
+        //
+        // create a mediasoup consumer object, hook it up to a producer here
+        // on the server side, and send back info needed to create a consumer
+        // object on the client side. always start consumers paused. client
+        // will request media to resume when the connection completes
+        //
+        let producer = this.producers.find((p) => p.appData.mediaTag === mediaTag && p.appData.peerId === mediaPeerId);
+        if (!producer) {
+            let msg = 'server-side producer for ' + `${mediaPeerId}:${mediaTag} not found`;
+            throw Error('recv-track: ' + msg)
+        }
+        if (!this.room.router.canConsume({
+            producerId: producer.id, rtpCapabilities
+        })) {
+            let msg = `client cannot consume ${mediaPeerId}:${mediaTag}`;
+            throw Error(`recv-track: ${peerId} ${msg}`)
+        }
+
+        let transport = Object.values(this.transports).find((t) => t.appData.peerId === peerId && t.appData.clientDirection === 'recv');
+        if (!transport) {
+            let msg = `server-side recv transport for ${peerId} not found`;
+            throw Error('recv-track: ' + msg)
+        }
+        let consumer = await transport.consume({
+            producerId: producer.id, rtpCapabilities, paused: true, // see note above about always starting paused
+            appData: {peerId, mediaPeerId, mediaTag}
+        });
+        consumer.on('transportclose', () => {
+            console.log(`consumer's transport closed`, consumer.id);
+            this._closeConsumerObject(consumer);
+        });
+        consumer.on('producerclose', () => {
+            console.log(`consumer's producer closed`, consumer.id);
+            this._closeConsumerObject((consumer));
+        });
+        this.consumers.push(consumer);
+        this.consumerLayers[consumer.id] = {
+            currentLayer: null, clientSelectedLayer: null
+        };
+        consumer.on('layerschange', (layers) => {
+            console.log(`consumer layerschange ${mediaPeerId}->${peerId}`, mediaTag, layers);
+            if (this.consumerLayers[consumer.id]) {
+                this.consumerLayers[consumer.id].currentLayer = layers && layers.spatialLayer;
+            }
+        });
+        return {
+            producerId: producer.id,
+            id: consumer.id,
+            kind: consumer.kind,
+            rtpParameters: consumer.rtpParameters,
+            type: consumer.type,
+            producerPaused: consumer.producerPaused
+        }
     }
 }
 
