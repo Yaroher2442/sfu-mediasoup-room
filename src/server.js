@@ -116,7 +116,7 @@ class Server {
     }
 
     addRoutes() {
-        this.expressApp.post('/signaling/sync', sync);
+        // this.expressApp.post('/signaling/sync', sync);
         this.expressApp.post('/signaling/join-as-new-peer', join);
         this.expressApp.post('/signaling/leave', leave);
         this.expressApp.post('/signaling/create-transport', crateNewTransport);
@@ -131,24 +131,29 @@ class Server {
         this.expressApp.post('/signaling/consumer-set-layers', consumerSetLayers);
         this.expressApp.post('/signaling/pause-producer', pauseProducer);
         this.expressApp.post('/signaling/resume-producer', resumeProducer);
+        this.expressApp.post('/signaling/:method', this.invokeMethod)
     }
 
-    async invokeMethod(commandPath, req, res) {
-        console.log(`exec command path ${commandPath}`)
+    async invokeMethod(req, res) {
+        console.log(`exec command ${req.params.method}`)
         try {
-            switch (commandPath) {
+            switch (req.params.method) {
                 case ("sync"):
-                    console.log(`exec command path ${commandPath}`)
-                    let {peerId} = req.body, now = Date.now();
-                    console.log('join-as-new-peer', peerId);
-                    roomState.peers[peerId] = {
-                        joinTs: now, lastSeenTs: now, media: {}, consumerLayers: {}, stats: {}
-                    };
-                    await room.join(peerId)
-                    res.send({routerRtpCapabilities: router.rtpCapabilities})
+                    let {peerId} = req.body;
+                    if (!roomState.peers[peerId]) {
+                        throw new Error('not connected');
+                    }
+
+                    // update our most-recently-seem timestamp -- we're not stale!
+                    roomState.peers[peerId].lastSeenTs = Date.now();
+                    let rps = {
+                        peers: roomState.peers, activeSpeaker: roomState.activeSpeaker
+                    }
+                    console.log(rps)
+                    res.send(rps);
             }
         } catch (e) {
-            console.error('error in /signaling/join-as-new-peer', e);
+            console.error(`error in /signaling/${req.params.method}`, e);
             res.send({error: e.message});
         }
     }
