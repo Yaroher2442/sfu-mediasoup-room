@@ -4,7 +4,7 @@ const express = require('express');
 const https = require('https');
 const fs = require('fs');
 const Room = require("./layer/room")
-const {formatWithOptions} = require("util");
+const {observer} = require("mediasoup");
 
 let httpsServer;
 
@@ -93,6 +93,7 @@ class MediaApp {
             rtcMaxPort: config.mediasoup.worker.rtcMaxPort,
         });
         this.worker.on('died', this.onWorkerDie)
+        return this.worker
     }
 
     onWorkerDie() {
@@ -132,6 +133,26 @@ class Server {
         this.expressApp.post('/signaling/resume-producer', resumeProducer);
     }
 
+    async invokeMethod(commandPath, req, res) {
+        console.log(`exec command path ${commandPath}`)
+        try {
+            switch (commandPath) {
+                case ("sync"):
+                    console.log(`exec command path ${commandPath}`)
+                    let {peerId} = req.body, now = Date.now();
+                    console.log('join-as-new-peer', peerId);
+                    roomState.peers[peerId] = {
+                        joinTs: now, lastSeenTs: now, media: {}, consumerLayers: {}, stats: {}
+                    };
+                    await room.join(peerId)
+                    res.send({routerRtpCapabilities: router.rtpCapabilities})
+            }
+        } catch (e) {
+            console.error('error in /signaling/join-as-new-peer', e);
+            res.send({error: e.message});
+        }
+    }
+
     async run() {
         try {
             const tls = {
@@ -162,23 +183,14 @@ class Server {
 }
 
 
-mediaApp = new MediaApp();
-
 async function main() {
     // start mediasoup
     console.log('starting mediasoup');
-    ({worker, router, audioLevelObserver} = await startMediasoup());
+    mediaApp = new MediaApp();
 
-
-    // await mediaApp.createWorker();
-    // worker = mediaApp.worker;
-    // const mediaCodecs = config.mediasoup.router.mediaCodecs;
-    // router = await mediaApp.worker.createRouter({mediaCodecs});
-    room = new Room()
-    // await room.createRouterAndObserver(router)
-    // audioLevelObserver = router.audioLevelObserver
-
-    let server = new Server();
+    ({worker, router, audioLevelObserver, room} = await startMediasoup(mediaApp));
+    console.log({worker, router, audioLevelObserver, room})
+    let server = new Server(mediaApp);
     // start https server, falling back to http if https fails
     console.log('starting express');
     await server.run()
@@ -205,44 +217,54 @@ main();
 //
 // start mediasoup with a single worker and router
 //
-
-async function startMediasoup() {
-    let worker = await mediasoup.createWorker({
-        logLevel: config.mediasoup.worker.logLevel,
-        logTags: config.mediasoup.worker.logTags,
-        rtcMinPort: config.mediasoup.worker.rtcMinPort,
-        rtcMaxPort: config.mediasoup.worker.rtcMaxPort,
-    });
-
-    worker.on('died', () => {
-        console.error('mediasoup worker died (this should never happen)');
-        process.exit(1);
-    });
-
+async function startMediasoup(mediaApp) {
+    room = new Room()
+    worker = await mediaApp.createWorker();
     const mediaCodecs = config.mediasoup.router.mediaCodecs;
-    const router = await worker.createRouter({mediaCodecs});
-
-    // audioLevelObserver for signaling active speaker
-    //
-    const audioLevelObserver = await router.createAudioLevelObserver({
-        interval: 800
-    });
-    audioLevelObserver.on('volumes', (volumes) => {
-        const {producer, volume} = volumes[0];
-        console.log('audio-level volumes event', producer.appData.peerId, volume);
-        roomState.activeSpeaker.producerId = producer.id;
-        roomState.activeSpeaker.volume = volume;
-        roomState.activeSpeaker.peerId = producer.appData.peerId;
-    });
-    audioLevelObserver.on('silence', () => {
-        console.log('audio-level silence event');
-        roomState.activeSpeaker.producerId = null;
-        roomState.activeSpeaker.volume = null;
-        roomState.activeSpeaker.peerId = null;
-    });
-
-    return {worker, router, audioLevelObserver};
+    router = await worker.createRouter({mediaCodecs});
+    await room.createRouterAndObserver(router)
+    console.log(room.audioLevelObserver)
+    return {worker, router, audioLevelObserver: room.audioLevelObserver, room};
 }
+
+// async function startMediasoup() {
+//     let worker = await mediasoup.createWorker({
+//         logLevel: config.mediasoup.worker.logLevel,
+//         logTags: config.mediasoup.worker.logTags,
+//         rtcMinPort: config.mediasoup.worker.rtcMinPort,
+//         rtcMaxPort: config.mediasoup.worker.rtcMaxPort,
+//     });
+//
+//     worker.on('died', () => {
+//         console.error('mediasoup worker died (this should never happen)');
+//         process.exit(1);
+//     });
+//
+//     const mediaCodecs = config.mediasoup.router.mediaCodecs;
+//     const router = await worker.createRouter({mediaCodecs});
+//
+//     // audioLevelObserver for signaling active speaker
+//     //
+//     const audioLevelObserver = await router.createAudioLevelObserver({
+//         interval: 800
+//     });
+//     audioLevelObserver.on('volumes', (volumes) => {
+//         console.log("saaaaaaaaaaaaaaaaaaaaaaaaaaa")
+//         const {producer, volume} = volumes[0];
+//         console.log('audio-level volumes event', producer.appData.peerId, volume);
+//         roomState.activeSpeaker.producerId = producer.id;
+//         roomState.activeSpeaker.volume = volume;
+//         roomState.activeSpeaker.peerId = producer.appData.peerId;
+//     });
+//     audioLevelObserver.on('silence', () => {
+//         console.log('audio-level silence event');
+//         roomState.activeSpeaker.producerId = null;
+//         roomState.activeSpeaker.volume = null;
+//         roomState.activeSpeaker.peerId = null;
+//     });
+//
+//     return {worker, router, audioLevelObserver};
+// }
 
 //
 // stats
@@ -405,7 +427,8 @@ async function join(req, res) {
         roomState.peers[peerId] = {
             joinTs: now, lastSeenTs: now, media: {}, consumerLayers: {}, stats: {}
         };
-        await room.join(peerId)
+        // TODO:ROOM
+        // await room.join(peerId)
         res.send({routerRtpCapabilities: router.rtpCapabilities});
     } catch (e) {
         console.error('error in /signaling/join-as-new-peer', e);
