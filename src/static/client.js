@@ -1050,10 +1050,10 @@ function screenshareEncodings() {
 // our "signaling" function -- just an http fetch
 //
 
-async function sig(endpoint, data, beacon) {
+async function sig(endpoint, data, beacon, peerId = myPeerId) {
   try {
     let headers = { 'Content-Type': 'application/json' },
-        body = JSON.stringify({ ...data, peerId: myPeerId });
+        body = JSON.stringify({ ...data, peerId: peerId });
 
     if (beacon) {
       navigator.sendBeacon('/signaling/' + endpoint, body);

@@ -38,8 +38,6 @@ class Peer {
         }
     }
 
-
-
     async updateStats() {
         for (let producer of this.producers) {
             if (producer.kind !== 'video') {
@@ -67,9 +65,9 @@ class Peer {
     }
 
     // TRANSPORTS
-    _findTransport(transportId) {
+    _findTransport(transportId, raise = true) {
         let transport = this.transports[transportId]
-        if (!transport) {
+        if (raise && !transport) {
             console.error(`connect-transport: server-side transport ${transportId} not found`);
             throw Error(`server-side transport ${transportId} not found`)
 
@@ -251,29 +249,6 @@ class Peer {
     }
 
     // TRACKS
-    async sentTrack(transportId, kind, rtpParameters, paused = false, appData) {
-        // --> /signaling/send-track
-        //
-        // called from inside a client's `transport.on('produce')` event handler.
-        //
-        let transport = this._findTransport(transportId)
-        let producer = await transport.produce({
-            kind, rtpParameters, paused, appData: {...appData, peerId: this.id, transportId}
-        });
-        producer.on('transportclose', () => {
-            this._closeProducerObject(producer);
-        });
-        if (producer.kind === 'audio') {
-            await this.room.addProducerToAudioObserver(producer.id)
-            // audioLevelObserver.addProducer({producerId: producer.id});
-        }
-        this.producers.push(producer);
-        this.media[appData.mediaTag] = {
-            paused, encodings: rtpParameters.encodings
-        };
-        return {id: producer.id}
-    }
-
     async receiveTrack(mediaPeerId, mediaTag, rtpCapabilities) {
         // --> /signaling/recv-track
         //
@@ -282,11 +257,9 @@ class Peer {
         // object on the client side. always start consumers paused. client
         // will request media to resume when the connection completes
         //
-        this.producers.forEach((pr)=>{
+        this.producers.forEach((pr) => {
             console.log(pr.appData)
-
         })
-
         let producer = this.producers.find((p) => p.appData.mediaTag === mediaTag && p.appData.peerId === this.id);
         if (!producer) {
             let msg = 'server-side producer for ' + `${mediaPeerId}:${mediaTag} not found`;
@@ -306,9 +279,9 @@ class Peer {
         }
         let consumer = await transport.consume({
             producerId: producer.id, rtpCapabilities, paused: true, // see note above about always starting paused
-            appData: {peerId:this.id, mediaPeerId, mediaTag}
+            appData: {peerId: this.id, mediaPeerId, mediaTag}
         });
-        consumer.on('transportclose', () =>  {
+        consumer.on('transportclose', () => {
             console.log(`consumer's transport closed`, consumer.id);
             this._closeConsumerObject(consumer);
         });

@@ -108,14 +108,17 @@ class Server {
                         peerId, transportId, kind, rtpParameters,
                         paused = false, appData
                     } = req.body
-                    let peer = room.findPeer(peerId)
-                    res.send(await peer.sentTrack(transportId, kind, rtpParameters, paused, appData))
+                    res.send(await room.peerSendTrack(peerId, transportId, kind, rtpParameters,
+                        paused = false, appData))
+                    // let peer = room.findPeer(peerId)
+                    // res.send(await peer.sentTrack(transportId, kind, rtpParameters, paused, appData))
                     break
                 }
                 case ("recv-track"): {
                     let {peerId, mediaPeerId, mediaTag, rtpCapabilities} = req.body;
-                    let peer = room.findPeer(peerId)
-                    res.send(await peer.receiveTrack(mediaPeerId, mediaTag, rtpCapabilities))
+                    // let peer = room.findPeer(peerId)
+                    // res.send(await peer.receiveTrack(mediaPeerId, mediaTag, rtpCapabilities))
+                    res.send(await room.peerReceiveTrack(peerId, mediaPeerId, mediaTag, rtpCapabilities))
                     break
                 }
 
