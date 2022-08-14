@@ -3690,7 +3690,7 @@ var Client = (function (exports) {
 	        return this._paused;
 	    }
 	    /**
-	     * Max spatial layer.
+	     * Max spatial kernel.
 	     *
 	     * @type {Number | undefined}
 	     */
@@ -3836,7 +3836,7 @@ var Client = (function (exports) {
 	        this._handleTrack();
 	    }
 	    /**
-	     * Sets the video max spatial layer to be sent.
+	     * Sets the video max spatial kernel to be sent.
 	     */
 	    async setMaxSpatialLayer(spatialLayer) {
 	        if (this._closed)

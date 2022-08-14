@@ -8,7 +8,6 @@ const log = debugModule('demo-app');
 const warn = debugModule('demo-app:WARN');
 const err = debugModule('demo-app:ERROR');
 
-
 //
 // export all the references we use internally to manage call state,
 // to make it easy to tinker from the js console. for example:
@@ -16,20 +15,42 @@ const err = debugModule('demo-app:ERROR');
 //   `Client.camVideoProducer.paused`
 //
 export const myPeerId = uuidv4();
-export let device,
-           joined,
-           localCam,
-           localScreen,
-           recvTransport,
-           sendTransport,
-           camVideoProducer,
-           camAudioProducer,
-           screenVideoProducer,
-           screenAudioProducer,
-           currentActiveSpeaker = {},
-           lastPollSyncData = {},
-           consumers = [],
-           pollingInterval;
+export let device;
+export let joined;
+export let localCam;
+export let localScreen;
+export let recvTransport;
+export let sendTransport;
+export let camVideoProducer;
+export let camAudioProducer;
+export let screenVideoProducer;
+export let screenAudioProducer;
+export let currentActiveSpeaker = {};
+export let lastPollSyncData = {};
+export let consumers = [];
+export let pollingInterval;
+
+//
+// our "signaling" function -- just an http fetch
+//
+
+async function sig(endpoint, data, beacon, peerId = myPeerId) {
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    const body = JSON.stringify({ ...data, peerId });
+
+    if (beacon) {
+      navigator.sendBeacon(`/signaling/${endpoint}`, body);
+      return null;
+    }
+
+    const response = await fetch(`/signaling/${endpoint}`, { method: 'POST', body, headers });
+    return await response.json();
+  } catch (e) {
+    console.error(e);
+    return { error: e };
+  }
+}
 
 //
 // entry point -- called by document.body.onload
@@ -37,15 +58,15 @@ export let device,
 
 export async function main() {
   console.log(`starting up ... my peerId is ${myPeerId}`);
+  console.log(window.location);
   try {
     device = new mediasoup.Device();
   } catch (e) {
     if (e.name === 'UnsupportedError') {
       console.error('browser not supported for video calls');
       return;
-    } else {
-      console.error(e);
     }
+    console.error(e);
   }
 
   // use sendBeacon to tell the server we're disconnecting when
@@ -68,7 +89,7 @@ export async function joinRoom() {
   try {
     // signal that we're a new peer and initialize our
     // mediasoup-client device, if this is our first time connecting
-    let { routerRtpCapabilities } = await sig('join-as-new-peer');
+    const { routerRtpCapabilities } = await sig('join-as-new-peer');
     if (!device.loaded) {
       await device.load({ routerRtpCapabilities });
     }
@@ -81,7 +102,7 @@ export async function joinRoom() {
 
   // super-simple signaling: let's poll at 1-second intervals
   pollingInterval = setInterval(async () => {
-    let { error } = await pollAndUpdate();
+    const { error } = await pollAndUpdate();
     if (error) {
       clearInterval(pollingInterval);
       err(error);
@@ -114,7 +135,7 @@ export async function sendCameraStreams() {
   camVideoProducer = await sendTransport.produce({
     track: localCam.getVideoTracks()[0],
     encodings: camEncodings(),
-    appData: { mediaTag: 'cam-video' }
+    appData: { mediaTag: 'cam-video' },
   });
   if (getCamPausedState()) {
     try {
@@ -127,7 +148,7 @@ export async function sendCameraStreams() {
   // same thing for audio, but we can use our already-created
   camAudioProducer = await sendTransport.produce({
     track: localCam.getAudioTracks()[0],
-    appData: { mediaTag: 'cam-audio' }
+    appData: { mediaTag: 'cam-audio' },
   });
   if (getMicPausedState()) {
     try {
@@ -155,21 +176,21 @@ export async function startScreenshare() {
   // get a screen share track
   localScreen = await navigator.mediaDevices.getDisplayMedia({
     video: true,
-    audio: true
+    audio: true,
   });
 
   // create a producer for video
   screenVideoProducer = await sendTransport.produce({
     track: localScreen.getVideoTracks()[0],
     encodings: screenshareEncodings(),
-    appData: { mediaTag: 'screen-video' }
+    appData: { mediaTag: 'screen-video' },
   });
 
   // create a producer for audio, if we have it
   if (localScreen.getAudioTracks().length) {
     screenAudioProducer = await sendTransport.produce({
       track: localScreen.getAudioTracks()[0],
-      appData: { mediaTag: 'screen-audio' }
+      appData: { mediaTag: 'screen-audio' },
     });
   }
 
@@ -179,16 +200,20 @@ export async function startScreenshare() {
     log('screen share stopped');
     try {
       await screenVideoProducer.pause();
-      let { error } = await sig('close-producer',
-                                { producerId: screenVideoProducer.id });
+      const { error } = await sig(
+        'close-producer',
+        { producerId: screenVideoProducer.id },
+      );
       await screenVideoProducer.close();
       screenVideoProducer = null;
       if (error) {
         err(error);
       }
       if (screenAudioProducer) {
-        let { error } = await sig('close-producer',
-                                  { producerId: screenAudioProducer.id });
+        const { error } = await sig(
+          'close-producer',
+          { producerId: screenAudioProducer.id },
+        );
         await screenAudioProducer.close();
         screenAudioProducer = null;
         if (error) {
@@ -201,7 +226,7 @@ export async function startScreenshare() {
     $('#local-screen-pause-ctrl').style.display = 'none';
     $('#local-screen-audio-pause-ctrl').style.display = 'none';
     $('#share-screen').style.display = 'initial';
-  }
+  };
 
   $('#local-screen-pause-ctrl').style.display = 'block';
   if (screenAudioProducer) {
@@ -217,7 +242,7 @@ export async function startCamera() {
   try {
     localCam = await navigator.mediaDevices.getUserMedia({
       video: true,
-      audio: true
+      audio: true,
     });
   } catch (e) {
     console.error('start camera error', e);
@@ -232,18 +257,18 @@ export async function cycleCamera() {
     return;
   }
 
-  log ('cycle camera');
+  log('cycle camera');
 
   // find "next" device in device list
-  let deviceId = await getCurrentDeviceId(),
-      allDevices = await navigator.mediaDevices.enumerateDevices(),
-      vidDevices = allDevices.filter((d) => d.kind === 'videoinput');
+  const deviceId = await getCurrentDeviceId();
+  const allDevices = await navigator.mediaDevices.enumerateDevices();
+  const vidDevices = allDevices.filter((d) => d.kind === 'videoinput');
   if (!vidDevices.length > 1) {
     warn('cannot cycle camera - only one camera');
     return;
   }
   let idx = vidDevices.findIndex((d) => d.deviceId === deviceId);
-  if (idx === (vidDevices.length-1)) {
+  if (idx === (vidDevices.length - 1)) {
     idx = 0;
   } else {
     idx += 1;
@@ -256,7 +281,7 @@ export async function cycleCamera() {
   log('getting a video stream from new device', vidDevices[idx].label);
   localCam = await navigator.mediaDevices.getUserMedia({
     video: { deviceId: { exact: vidDevices[idx].deviceId } },
-    audio: true
+    audio: true,
   });
 
   // replace the tracks we are sending
@@ -278,8 +303,10 @@ export async function stopStreams() {
   log('stop sending media streams');
   $('#stop-streams').style.display = 'none';
 
-  let { error } = await sig('close-transport',
-                            { transportId: sendTransport.id });
+  const { error } = await sig(
+    'close-transport',
+    { transportId: sendTransport.id },
+  );
   if (error) {
     err(error);
   }
@@ -320,7 +347,7 @@ export async function leaveRoom() {
   clearInterval(pollingInterval);
 
   // close everything on the server-side (transports, producers, consumers)
-  let { error } = await sig('leave');
+  const { error } = await sig('leave');
   if (error) {
     err(error);
   }
@@ -372,21 +399,21 @@ export async function subscribeToTrack(peerId, mediaTag) {
   // method
   let consumer = findConsumerForTrack(peerId, mediaTag);
   if (consumer) {
-    err('already have consumer for track', peerId, mediaTag)
+    err('already have consumer for track', peerId, mediaTag);
     return;
-  };
+  }
 
   // ask the server to create a server-side consumer object and send
   // us back the info we need to create a client-side consumer
-  let consumerParameters = await sig('recv-track', {
+  const consumerParameters = await sig('recv-track', {
     mediaTag,
     mediaPeerId: peerId,
-    rtpCapabilities: device.rtpCapabilities
+    rtpCapabilities: device.rtpCapabilities,
   });
   log('consumer parameters', consumerParameters);
   consumer = await recvTransport.consume({
     ...consumerParameters,
-    appData: { peerId, mediaTag }
+    appData: { peerId, mediaTag },
   });
   log('created new consumer', consumer.id);
 
@@ -394,7 +421,7 @@ export async function subscribeToTrack(peerId, mediaTag) {
   // until we're connected, then send a resume request to the server
   // to get our first keyframe and start displaying video
   while (recvTransport.connectionState !== 'connected') {
-    log('  transport connstate', recvTransport.connectionState );
+    log('  transport connstate', recvTransport.connectionState);
     await sleep(100);
   }
   // okay, we're ready. let's ask the peer to send us media
@@ -409,7 +436,7 @@ export async function subscribeToTrack(peerId, mediaTag) {
 }
 
 export async function unsubscribeFromTrack(peerId, mediaTag) {
-  let consumer = findConsumerForTrack(peerId, mediaTag);
+  const consumer = findConsumerForTrack(peerId, mediaTag);
   if (!consumer) {
     return;
   }
@@ -498,9 +525,9 @@ async function createTransport(direction) {
 
   // ask the server to create a server-side transport object and send
   // us back the info we need to create a client-side transport
-  let transport,
-      { transportOptions } = await sig('create-transport', { direction });
-  log ('transport options', transportOptions);
+  let transport;
+  const { transportOptions } = await sig('create-transport', { direction });
+  log('transport options', transportOptions);
 
   if (direction === 'recv') {
     transport = await device.createRecvTransport(transportOptions);
@@ -515,9 +542,9 @@ async function createTransport(direction) {
   // server, then call callback() on success or errback() on failure.
   transport.on('connect', async ({ dtlsParameters }, callback, errback) => {
     log('transport connect event', direction);
-    let { error } = await sig('connect-transport', {
+    const { error } = await sig('connect-transport', {
       transportId: transportOptions.id,
-      dtlsParameters
+      dtlsParameters,
     });
     if (error) {
       err('error connecting transport', direction, error);
@@ -531,8 +558,11 @@ async function createTransport(direction) {
     // sending transports will emit a produce event when a new track
     // needs to be set up to start sending. the producer's appData is
     // passed as a parameter
-    transport.on('produce', async ({ kind, rtpParameters, appData },
-                                   callback, errback) => {
+    transport.on('produce', async (
+      { kind, rtpParameters, appData },
+      callback,
+      errback,
+    ) => {
       log('transport produce event', appData.mediaTag);
       // we may want to start out paused (if the checkboxes in the ui
       // aren't checked, for each media type. not very clean code, here
@@ -547,12 +577,12 @@ async function createTransport(direction) {
       // up a server-side producer object, and get back a
       // producer.id. call callback() on success or errback() on
       // failure.
-      let { error, id } = await sig('send-track', {
+      const { error, id } = await sig('send-track', {
         transportId: transportOptions.id,
         kind,
         rtpParameters,
         paused,
-        appData
+        appData,
       });
       if (error) {
         err('error setting up server-side producer', error);
@@ -585,12 +615,12 @@ async function createTransport(direction) {
 //
 
 async function pollAndUpdate() {
-  let { peers, activeSpeaker, error } = await sig('sync');
+  const { peers, activeSpeaker, error } = await sig('sync');
   if (error) {
     return ({ error });
   }
-  console.log(peers)
-  console.log(activeSpeaker)
+  console.log(peers);
+  console.log(activeSpeaker);
 
   // always update bandwidth stats and active speaker display
   currentActiveSpeaker = activeSpeaker;
@@ -604,15 +634,15 @@ async function pollAndUpdate() {
   // seen time and stats, so we can easily do a deep-equals
   // comparison. compare this list with the cached list from last
   // poll.
-  let thisPeersList = sortPeers(peers),
-      lastPeersList = sortPeers(lastPollSyncData);
+  const thisPeersList = sortPeers(peers);
+  const lastPeersList = sortPeers(lastPollSyncData);
   if (!deepEqual(thisPeersList, lastPeersList)) {
     updatePeersDisplay(peers, thisPeersList);
   }
 
   // if a peer has gone away, we need to close all consumers we have
   // for that peer and remove video and audio elements
-  for (let id in lastPollSyncData) {
+  for (const id in lastPollSyncData) {
     if (!peers[id]) {
       log(`peer ${id} has exited`);
       consumers.forEach((consumer) => {
@@ -626,7 +656,7 @@ async function pollAndUpdate() {
   // if a peer has stopped sending media that we are consuming, we
   // need to close the consumer and remove video and audio elements
   consumers.forEach((consumer) => {
-    let { peerId, mediaTag } = consumer.appData;
+    const { peerId, mediaTag } = consumer.appData;
     if (!peers[peerId].media[mediaTag]) {
       log(`peer ${peerId} has stopped transmitting ${mediaTag}`);
       closeConsumer(consumer);
@@ -638,14 +668,14 @@ async function pollAndUpdate() {
 }
 
 function sortPeers(peers) {
-  return  Object.entries(peers)
-    .map(([id, info]) => ({id, joinTs: info.joinTs, media: { ...info.media }}))
-    .sort((a,b) => (a.joinTs>b.joinTs) ? 1 : ((b.joinTs>a.joinTs) ? -1 : 0));
+  return Object.entries(peers)
+    .map(([id, info]) => ({ id, joinTs: info.joinTs, media: { ...info.media } }))
+    .sort((a, b) => ((a.joinTs > b.joinTs) ? 1 : ((b.joinTs > a.joinTs) ? -1 : 0)));
 }
 
 function findConsumerForTrack(peerId, mediaTag) {
-  return consumers.find((c) => (c.appData.peerId === peerId &&
-                                c.appData.mediaTag === mediaTag));
+  return consumers.find((c) => (c.appData.peerId === peerId
+                                && c.appData.mediaTag === mediaTag));
 }
 
 //
@@ -708,38 +738,51 @@ export async function changeScreenAudioPaused() {
   }
 }
 
-
-export async function updatePeersDisplay(peersInfo = lastPollSyncData,
-                                         sortedPeers = sortPeers(peersInfo)) {
+export async function updatePeersDisplay(
+  peersInfo = lastPollSyncData,
+  sortedPeers = sortPeers(peersInfo),
+) {
   log('room state updated', peersInfo);
 
   $('#available-tracks').innerHTML = '';
   if (camVideoProducer) {
     $('#available-tracks')
-      .appendChild(makeTrackControlEl('my', 'cam-video',
-                                      peersInfo[myPeerId].media['cam-video']));
+      .appendChild(makeTrackControlEl(
+        'my',
+        'cam-video',
+        peersInfo[myPeerId].media['cam-video'],
+      ));
   }
   if (camAudioProducer) {
     $('#available-tracks')
-      .appendChild(makeTrackControlEl('my', 'cam-audio',
-                                      peersInfo[myPeerId].media['cam-audio']));
+      .appendChild(makeTrackControlEl(
+        'my',
+        'cam-audio',
+        peersInfo[myPeerId].media['cam-audio'],
+      ));
   }
   if (screenVideoProducer) {
     $('#available-tracks')
-      .appendChild(makeTrackControlEl('my', 'screen-video',
-                                    peersInfo[myPeerId].media['screen-video']));
+      .appendChild(makeTrackControlEl(
+        'my',
+        'screen-video',
+        peersInfo[myPeerId].media['screen-video'],
+      ));
   }
   if (screenAudioProducer) {
     $('#available-tracks')
-      .appendChild(makeTrackControlEl('my', 'screen-audio',
-                                    peersInfo[myPeerId].media['screen-audio']));
+      .appendChild(makeTrackControlEl(
+        'my',
+        'screen-audio',
+        peersInfo[myPeerId].media['screen-audio'],
+      ));
   }
 
-  for (let peer of sortedPeers) {
+  for (const peer of sortedPeers) {
     if (peer.id === myPeerId) {
       continue;
     }
-    for (let [mediaTag, info] of Object.entries(peer.media)) {
+    for (const [mediaTag, info] of Object.entries(peer.media)) {
       $('#available-tracks')
         .appendChild(makeTrackControlEl(peer.id, mediaTag, info));
     }
@@ -747,33 +790,32 @@ export async function updatePeersDisplay(peersInfo = lastPollSyncData,
 }
 
 function makeTrackControlEl(peerName, mediaTag, mediaInfo) {
-  let div = document.createElement('div'),
-      peerId = (peerName === 'my' ? myPeerId : peerName),
-      consumer = findConsumerForTrack(peerId, mediaTag);
+  const div = document.createElement('div');
+  const peerId = (peerName === 'my' ? myPeerId : peerName);
+  const consumer = findConsumerForTrack(peerId, mediaTag);
   div.classList = `track-subscribe track-subscribe-${peerId}`;
 
-  let sub = document.createElement('button');
+  const sub = document.createElement('button');
   if (!consumer) {
-    sub.innerHTML += 'subscribe'
+    sub.innerHTML += 'subscribe';
     sub.onclick = () => subscribeToTrack(peerId, mediaTag);
     div.appendChild(sub);
-
   } else {
-    sub.innerHTML += 'unsubscribe'
+    sub.innerHTML += 'unsubscribe';
     sub.onclick = () => unsubscribeFromTrack(peerId, mediaTag);
     div.appendChild(sub);
   }
 
-  let trackDescription = document.createElement('span');
-  trackDescription.innerHTML = `${peerName} ${mediaTag}`
+  const trackDescription = document.createElement('span');
+  trackDescription.innerHTML = `${peerName} ${mediaTag}`;
   div.appendChild(trackDescription);
 
   try {
     if (mediaInfo) {
-      let producerPaused = mediaInfo.paused;
-      let prodPauseInfo = document.createElement('span');
+      const producerPaused = mediaInfo.paused;
+      const prodPauseInfo = document.createElement('span');
       prodPauseInfo.innerHTML = producerPaused ? '[producer paused]'
-                                               : '[producer playing]';
+        : '[producer playing]';
       div.appendChild(prodPauseInfo);
     }
   } catch (e) {
@@ -781,9 +823,9 @@ function makeTrackControlEl(peerName, mediaTag, mediaInfo) {
   }
 
   if (consumer) {
-    let pause = document.createElement('span'),
-        checkbox = document.createElement('input'),
-        label = document.createElement('label');
+    const pause = document.createElement('span');
+    const checkbox = document.createElement('input');
+    const label = document.createElement('label');
     pause.classList = 'nowrap';
     checkbox.type = 'checkbox';
     checkbox.checked = !consumer.paused;
@@ -794,13 +836,13 @@ function makeTrackControlEl(peerName, mediaTag, mediaInfo) {
         await pauseConsumer(consumer);
       }
       updatePeersDisplay();
-    }
+    };
     label.id = `consumer-stats-${consumer.id}`;
     if (consumer.paused) {
-      label.innerHTML = '[consumer paused]'
+      label.innerHTML = '[consumer paused]';
     } else {
-      let stats = lastPollSyncData[myPeerId].stats[consumer.id],
-          bitrate = '-';
+      const stats = lastPollSyncData[myPeerId].stats[consumer.id];
+      let bitrate = '-';
       if (stats) {
         bitrate = Math.floor(stats.bitrate / 1000.0);
       }
@@ -811,7 +853,7 @@ function makeTrackControlEl(peerName, mediaTag, mediaInfo) {
     div.appendChild(pause);
 
     if (consumer.kind === 'video') {
-      let remoteProducerInfo = document.createElement('span');
+      const remoteProducerInfo = document.createElement('span');
       remoteProducerInfo.classList = 'nowrap track-ctrl';
       remoteProducerInfo.id = `track-ctrl-${consumer.producerId}`;
       div.appendChild(remoteProducerInfo);
@@ -825,7 +867,7 @@ function addVideoAudio(consumer) {
   if (!(consumer && consumer.track)) {
     return;
   }
-  let el = document.createElement(consumer.kind);
+  const el = document.createElement(consumer.kind);
   // set some attributes on our audio and video elements to make
   // mobile Safari happy. note that for audio to play you need to be
   // capturing from the mic/camera
@@ -836,13 +878,13 @@ function addVideoAudio(consumer) {
     el.setAttribute('autoplay', true);
   }
   $(`#remote-${consumer.kind}`).appendChild(el);
-  el.srcObject = new MediaStream([ consumer.track.clone() ]);
+  el.srcObject = new MediaStream([consumer.track.clone()]);
   el.consumer = consumer;
   // let's "yield" and return before playing, rather than awaiting on
   // play() succeeding. play() will not succeed on a producer-paused
   // track until the producer unpauses.
   el.play()
-    .then(()=>{})
+    .then(() => {})
     .catch((e) => {
       err(e);
     });
@@ -857,16 +899,16 @@ function removeVideoAudio(consumer) {
 }
 
 async function showCameraInfo() {
-  let deviceId = await getCurrentDeviceId(),
-      infoEl = $('#camera-info');
+  const deviceId = await getCurrentDeviceId();
+  const infoEl = $('#camera-info');
   if (!deviceId) {
     infoEl.innerHTML = '';
     return;
   }
-  let devices = await navigator.mediaDevices.enumerateDevices(),
-      deviceInfo = devices.find((d) => d.deviceId === deviceId);
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const deviceInfo = devices.find((d) => d.deviceId === deviceId);
   infoEl.innerHTML = `
-      ${ deviceInfo.label }
+      ${deviceInfo.label}
       <button onclick="Client.cycleCamera()">switch camera</button>
   `;
 }
@@ -875,17 +917,17 @@ export async function getCurrentDeviceId() {
   if (!camVideoProducer) {
     return null;
   }
-  let deviceId = camVideoProducer.track.getSettings().deviceId;
+  const { deviceId } = camVideoProducer.track.getSettings();
   if (deviceId) {
     return deviceId;
   }
   // Firefox doesn't have deviceId in MediaTrackSettings object
-  let track = localCam && localCam.getVideoTracks()[0];
+  const track = localCam && localCam.getVideoTracks()[0];
   if (!track) {
     return null;
   }
-  let devices = await navigator.mediaDevices.enumerateDevices(),
-      deviceInfo = devices.find((d) => d.label.startsWith(track.label));
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const deviceInfo = devices.find((d) => d.label.startsWith(track.label));
   return deviceInfo.deviceId;
 }
 
@@ -901,7 +943,7 @@ function updateActiveSpeaker() {
 }
 
 function updateCamVideoProducerStatsDisplay() {
-  let tracksEl = $('#camera-producer-stats');
+  const tracksEl = $('#camera-producer-stats');
   tracksEl.innerHTML = '';
   if (!camVideoProducer || camVideoProducer.paused) {
     return;
@@ -914,12 +956,13 @@ function updateCamVideoProducerStatsDisplay() {
     currentLayer: camVideoProducer.maxSpatialLayer,
     layerSwitchFunc: (i) => {
       console.log('client set layers for cam stream');
-      camVideoProducer.setMaxSpatialLayer(i) }
+      camVideoProducer.setMaxSpatialLayer(i);
+    },
   });
 }
 
 function updateScreenVideoProducerStatsDisplay() {
-  let tracksEl = $('#screen-producer-stats');
+  const tracksEl = $('#screen-producer-stats');
   tracksEl.innerHTML = '';
   if (!screenVideoProducer || screenVideoProducer.paused) {
     return;
@@ -932,20 +975,21 @@ function updateScreenVideoProducerStatsDisplay() {
     currentLayer: screenVideoProducer.maxSpatialLayer,
     layerSwitchFunc: (i) => {
       console.log('client set layers for screen stream');
-      screenVideoProducer.setMaxSpatialLayer(i) }
+      screenVideoProducer.setMaxSpatialLayer(i);
+    },
   });
 }
 
 function updateConsumersStatsDisplay() {
   try {
-    for (let consumer of consumers) {
-      let label = $(`#consumer-stats-${consumer.id}`);
+    for (const consumer of consumers) {
+      const label = $(`#consumer-stats-${consumer.id}`);
       if (label) {
         if (consumer.paused) {
-          label.innerHTML = '(consumer paused)'
+          label.innerHTML = '(consumer paused)';
         } else {
-          let stats = lastPollSyncData[myPeerId].stats[consumer.id],
-              bitrate = '-';
+          const stats = lastPollSyncData[myPeerId].stats[consumer.id];
+          let bitrate = '-';
           if (stats) {
             bitrate = Math.floor(stats.bitrate / 1000.0);
           }
@@ -953,27 +997,29 @@ function updateConsumersStatsDisplay() {
         }
       }
 
-      let mediaInfo = lastPollSyncData[consumer.appData.peerId] &&
-                      lastPollSyncData[consumer.appData.peerId]
+      const mediaInfo = lastPollSyncData[consumer.appData.peerId]
+                      && lastPollSyncData[consumer.appData.peerId]
                         .media[consumer.appData.mediaTag];
       if (mediaInfo && !mediaInfo.paused) {
-        let tracksEl = $(`#track-ctrl-${consumer.producerId}`);
+        const tracksEl = $(`#track-ctrl-${consumer.producerId}`);
         if (tracksEl && lastPollSyncData[myPeerId]
-                               .consumerLayers[consumer.id]) {
+          .consumerLayers[consumer.id]) {
           tracksEl.innerHTML = '';
-          let currentLayer = lastPollSyncData[myPeerId]
-                               .consumerLayers[consumer.id].currentLayer;
+          const { currentLayer } = lastPollSyncData[myPeerId]
+            .consumerLayers[consumer.id];
           makeProducerTrackSelector({
             internalTag: consumer.id,
             container: tracksEl,
             peerId: consumer.appData.peerId,
             producerId: consumer.producerId,
-            currentLayer: currentLayer,
+            currentLayer,
             layerSwitchFunc: (i) => {
               console.log('ask server to set layers');
-              sig('consumer-set-layers', { consumerId: consumer.id,
-                                           spatialLayer: i });
-            }
+              sig('consumer-set-layers', {
+                consumerId: consumer.id,
+                spatialLayer: i,
+              });
+            },
           });
         }
       }
@@ -983,30 +1029,32 @@ function updateConsumersStatsDisplay() {
   }
 }
 
-function makeProducerTrackSelector({ internalTag, container, peerId, producerId,
-                                     currentLayer, layerSwitchFunc }) {
+function makeProducerTrackSelector({
+  internalTag, container, peerId, producerId,
+  currentLayer, layerSwitchFunc,
+}) {
   try {
-    let pollStats = lastPollSyncData[peerId] &&
-                    lastPollSyncData[peerId].stats[producerId];
+    const pollStats = lastPollSyncData[peerId]
+                    && lastPollSyncData[peerId].stats[producerId];
     if (!pollStats) {
       return;
     }
 
-    let stats = [...Array.from(pollStats)]
-                  .sort((a,b) => a.rid > b.rid ? 1 : (a.rid<b.rid ? -1 : 0));
-    let i=0;
-    for (let s of stats) {
-      let div = document.createElement('div'),
-          radio = document.createElement('input'),
-          label = document.createElement('label'),
-          x = i;
+    const stats = [...Array.from(pollStats)]
+      .sort((a, b) => (a.rid > b.rid ? 1 : (a.rid < b.rid ? -1 : 0)));
+    let i = 0;
+    for (const s of stats) {
+      const div = document.createElement('div');
+      const radio = document.createElement('input');
+      const label = document.createElement('label');
+      const x = i;
       radio.type = 'radio';
       radio.name = `radio-${internalTag}-${producerId}`;
-      radio.checked = currentLayer == undefined ?
-                          (i === stats.length-1) :
-                          (i === currentLayer);
+      radio.checked = currentLayer == undefined
+        ? (i === stats.length - 1)
+        : (i === currentLayer);
       radio.onchange = () => layerSwitchFunc(x);
-      let bitrate = Math.floor(s.bitrate / 1000);
+      const bitrate = Math.floor(s.bitrate / 1000);
       label.innerHTML = `${bitrate} kb/s`;
       div.appendChild(radio);
       div.appendChild(label);
@@ -1014,7 +1062,7 @@ function makeProducerTrackSelector({ internalTag, container, peerId, producerId,
       i++;
     }
     if (i) {
-      let txt = document.createElement('div');
+      const txt = document.createElement('div');
       txt.innerHTML = 'tracks';
       container.insertBefore(txt, container.firstChild);
     }
@@ -1030,9 +1078,8 @@ function makeProducerTrackSelector({ internalTag, container, peerId, producerId,
 // just two resolutions, for now, as chrome 75 seems to ignore more
 // than two encodings
 //
-const CAM_VIDEO_SIMULCAST_ENCODINGS =
-[
-  { maxBitrate:  96000, scaleResolutionDownBy: 4 },
+const CAM_VIDEO_SIMULCAST_ENCODINGS = [
+  { maxBitrate: 96000, scaleResolutionDownBy: 4 },
   { maxBitrate: 680000, scaleResolutionDownBy: 1 },
 ];
 
@@ -1047,36 +1094,11 @@ function screenshareEncodings() {
 }
 
 //
-// our "signaling" function -- just an http fetch
-//
-
-async function sig(endpoint, data, beacon, peerId = myPeerId) {
-  try {
-    let headers = { 'Content-Type': 'application/json' },
-        body = JSON.stringify({ ...data, peerId: peerId });
-
-    if (beacon) {
-      navigator.sendBeacon('/signaling/' + endpoint, body);
-      return null;
-    }
-
-    let response = await fetch(
-      '/signaling/' + endpoint, { method: 'POST', body, headers }
-    );
-    return await response.json();
-  } catch (e) {
-    console.error(e);
-    return { error: e };
-  }
-}
-
-//
 // simple uuid helper function
 //
 
 function uuidv4() {
-  return ('111-111-1111').replace(/[018]/g, () =>
-         (crypto.getRandomValues(new Uint8Array(1))[0] & 15).toString(16));
+  return ('111-111-1111').replace(/[018]/g, () => (crypto.getRandomValues(new Uint8Array(1))[0] & 15).toString(16));
 }
 
 //

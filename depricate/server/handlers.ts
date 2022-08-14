@@ -269,7 +269,7 @@ export const receiveTrack = async (req: Request, res: Response) => {
                 clientSelectedLayer: null
             })
 
-        // update above data structure when layer changes.
+        // update above data structure when kernel changes.
         consumer.on('layerschange', (layers: { spatialLayer: any; }) => {
             log(`consumer layerschange ${mediaPeerId}->${peerId}`, mediaTag, layers);
             if (mediaLayer.peers.get(peerId) &&

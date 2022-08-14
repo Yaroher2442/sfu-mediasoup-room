@@ -127,7 +127,7 @@ export class Layer {
         // remove this consumer from our roomState.consumers list
         this.consumers = this.consumers.filter((c) => c.id !== consumer.id);
 
-        // remove layer info from from our roomState...consumerLayers bookkeeping
+        // remove kernel info from from our roomState...consumerLayers bookkeeping
         let peerId = consumer.appData.peerId as string;
         if (this.peers.get(peerId)) {
             this.peers.get(peerId)!.consumerLayers.delete(consumer.id);
