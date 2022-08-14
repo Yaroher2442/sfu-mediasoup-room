@@ -2,56 +2,23 @@ const mediasoup = require('mediasoup');
 const express = require('express');
 const https = require('https');
 const fs = require('fs');
-const Room = require('./kernel/room');
+const cors = require('cors');
 const config = require('./config');
-
-const TESTROOMNAME = 'new_room';
-
-class MediaApp {
-  worker;
-
-  rooms;
-
-  constructor() {
-    this.rooms = {};
-  }
-
-  async createWorker() {
-    this.worker = await mediasoup.createWorker({
-      logLevel: config.mediasoup.worker.logLevel,
-      logTags: config.mediasoup.worker.logTags,
-      rtcMinPort: config.mediasoup.worker.rtcMinPort,
-      rtcMaxPort: config.mediasoup.worker.rtcMaxPort,
-    });
-    this.worker.on('died', () => {
-      console.error('mediasoup worker died (this should never happen)');
-      process.exit(1);
-    });
-    return this.worker;
-  }
-
-  createNewRoom(roomId) {
-    this.rooms[roomId] = new Room();
-  }
-
-  getRoom(roomId) {
-    if (!this.rooms[roomId]) {
-      throw Error('room not found');
-    }
-    return this.rooms[roomId];
-  }
-}
+const MediaApp = require('./kernel/app');
 
 class Server {
   expressApp = express();
+
+  v;
 
   mediaApp;
 
   constructor(mediaApp) {
     this.mediaApp = mediaApp;
     this.expressApp.set('mediaApp', mediaApp);
+    this.expressApp.use(cors());
     this.expressApp.use(express.json({ type: '*/*' }));
-    this.expressApp.use(express.static('./src/static'));
+    this.expressApp.use('/:roomId', express.static('./src/static'));
     this.createApi();
   }
 
@@ -64,19 +31,19 @@ class Server {
     this.expressApp.post('/signaling/sync', async (req, res) => {
       try {
         const mediaApp = req.app.get('mediaApp');
-        const room = mediaApp.getRoom(TESTROOMNAME);
-        const { peerId } = req.body;
+        const { peerId, roomId } = req.body;
+        const room = await mediaApp.getRoom(roomId);
         res.send(await room.syncRemotePeer(peerId));
       } catch (e) {
         console.log(e);
         res.status(400).send(e);
       }
     });
-    this.expressApp.post('/signaling/join-as-new-peer', async (req, res) => {
+    this.expressApp.post('/signaling/join', async (req, res) => {
       try {
         const mediaApp = req.app.get('mediaApp');
-        const room = mediaApp.getRoom(TESTROOMNAME);
-        const { peerId } = req.body;
+        const { peerId, roomId } = req.body;
+        const room = await mediaApp.getRoom(roomId);
         res.send(await room.join(peerId));
       } catch (e) {
         console.log(e);
@@ -86,9 +53,14 @@ class Server {
     this.expressApp.post('/signaling/leave', async (req, res) => {
       try {
         const mediaApp = req.app.get('mediaApp');
-        const room = mediaApp.getRoom(TESTROOMNAME);
-        const { peerId } = req.body;
-        res.send(await room.leave(peerId));
+        const { peerId, roomId } = req.body;
+        const room = await mediaApp.getRoom(roomId);
+        const isLastPeer = mediaApp.checkLastPeerInRoom(roomId);
+        const response = await room.leave(peerId);
+        if (isLastPeer) {
+          mediaApp.deleteEmptyRoom(roomId);
+        }
+        res.send(response);
       } catch (e) {
         console.log(e);
         res.status(400).send(e);
@@ -97,8 +69,8 @@ class Server {
     this.expressApp.post('/signaling/create-transport', async (req, res) => {
       try {
         const mediaApp = req.app.get('mediaApp');
-        const room = mediaApp.getRoom(TESTROOMNAME);
-        const { peerId, direction } = req.body;
+        const { peerId, direction, roomId } = req.body;
+        const room = await mediaApp.getRoom(roomId);
         const peer = room.findPeer(peerId);
         res.send(await peer.crateNewTransport(direction));
       } catch (e) {
@@ -109,8 +81,10 @@ class Server {
     this.expressApp.post('/signaling/connect-transport', async (req, res) => {
       try {
         const mediaApp = req.app.get('mediaApp');
-        const room = mediaApp.getRoom(TESTROOMNAME);
-        const { peerId, transportId, dtlsParameters } = req.body;
+        const {
+          peerId, transportId, dtlsParameters, roomId,
+        } = req.body;
+        const room = await mediaApp.getRoom(roomId);
         const peer = room.findPeer(peerId);
         res.send(await peer.connectTransport(transportId, dtlsParameters));
       } catch (e) {
@@ -121,8 +95,8 @@ class Server {
     this.expressApp.post('/signaling/close-transport', async (req, res) => {
       try {
         const mediaApp = req.app.get('mediaApp');
-        const room = mediaApp.getRoom(TESTROOMNAME);
-        const { peerId, transportId } = req.body;
+        const { peerId, transportId, roomId } = req.body;
+        const room = await mediaApp.getRoom(roomId);
         const peer = room.findPeer(peerId);
         res.send(await peer.closeTransport(transportId));
       } catch (e) {
@@ -133,8 +107,8 @@ class Server {
     this.expressApp.post('/signaling/close-producer', async (req, res) => {
       try {
         const mediaApp = req.app.get('mediaApp');
-        const room = mediaApp.getRoom(TESTROOMNAME);
-        const { peerId, producerId } = req.body;
+        const { peerId, producerId, roomId } = req.body;
+        const room = await mediaApp.getRoom(roomId);
         const peer = room.findPeer(peerId);
         res.send(await peer.closeProducer(producerId));
       } catch (e) {
@@ -145,11 +119,11 @@ class Server {
     this.expressApp.post('/signaling/send-track', async (req, res) => {
       try {
         const mediaApp = req.app.get('mediaApp');
-        const room = mediaApp.getRoom(TESTROOMNAME);
         const {
           peerId, transportId, kind, rtpParameters,
-          paused = false, appData,
+          paused = false, appData, roomId,
         } = req.body;
+        const room = await mediaApp.getRoom(roomId);
         res.send(await room.peerSendTrack(
           peerId,
           transportId,
@@ -166,10 +140,10 @@ class Server {
     this.expressApp.post('/signaling/recv-track', async (req, res) => {
       try {
         const mediaApp = req.app.get('mediaApp');
-        const room = mediaApp.getRoom(TESTROOMNAME);
         const {
-          peerId, mediaPeerId, mediaTag, rtpCapabilities,
+          peerId, mediaPeerId, mediaTag, rtpCapabilities, roomId,
         } = req.body;
+        const room = await mediaApp.getRoom(roomId);
         // let peer = room.findPeer(peerId)
         // res.send(await peer.receiveTrack(mediaPeerId, mediaTag, rtpCapabilities))
         res.send(await room.peerReceiveTrack(peerId, mediaPeerId, mediaTag, rtpCapabilities));
@@ -181,8 +155,8 @@ class Server {
     this.expressApp.post('/signaling/pause-consumer', async (req, res) => {
       try {
         const mediaApp = req.app.get('mediaApp');
-        const room = mediaApp.getRoom(TESTROOMNAME);
-        const { peerId, consumerId } = req.body;
+        const { peerId, consumerId, roomId } = req.body;
+        const room = await mediaApp.getRoom(roomId);
         const peer = room.findPeer(peerId);
         res.send(await peer.pauseConsumer(consumerId));
       } catch (e) {
@@ -193,8 +167,8 @@ class Server {
     this.expressApp.post('/signaling/resume-consumer', async (req, res) => {
       try {
         const mediaApp = req.app.get('mediaApp');
-        const room = mediaApp.getRoom(TESTROOMNAME);
-        const { peerId, consumerId } = req.body;
+        const { peerId, consumerId, roomId } = req.body;
+        const room = await mediaApp.getRoom(roomId);
         const peer = room.findPeer(peerId);
         res.send(await peer.resumeConsumer(consumerId));
       } catch (e) {
@@ -205,8 +179,8 @@ class Server {
     this.expressApp.post('/signaling/close-consumer', async (req, res) => {
       try {
         const mediaApp = req.app.get('mediaApp');
-        const room = mediaApp.getRoom(TESTROOMNAME);
-        const { peerId, consumerId } = req.body;
+        const { peerId, consumerId, roomId } = req.body;
+        const room = await mediaApp.getRoom(roomId);
         const peer = room.findPeer(peerId);
         res.send(await peer.closeConsumer(consumerId));
       } catch (e) {
@@ -217,8 +191,10 @@ class Server {
     this.expressApp.post('/signaling/consumer-set-layers', async (req, res) => {
       try {
         const mediaApp = req.app.get('mediaApp');
-        const room = mediaApp.getRoom(TESTROOMNAME);
-        const { peerId, consumerId, spatialLayer } = req.body;
+        const {
+          peerId, consumerId, spatialLayer, roomId,
+        } = req.body;
+        const room = await mediaApp.getRoom(roomId);
         const peer = room.findPeer(peerId);
         res.send(await peer.consumerSetLayers(consumerId, spatialLayer));
       } catch (e) {
@@ -229,8 +205,8 @@ class Server {
     this.expressApp.post('/signaling/pause-producer', async (req, res) => {
       try {
         const mediaApp = req.app.get('mediaApp');
-        const room = mediaApp.getRoom(TESTROOMNAME);
-        const { peerId, producerId } = req.body;
+        const { peerId, producerId, roomId } = req.body;
+        const room = await mediaApp.getRoom(roomId);
         const peer = room.findPeer(peerId);
         res.send(await peer.pauseProducer(producerId));
       } catch (e) {
@@ -241,8 +217,8 @@ class Server {
     this.expressApp.post('/signaling/resume-producer', async (req, res) => {
       try {
         const mediaApp = req.app.get('mediaApp');
-        const room = mediaApp.getRoom(TESTROOMNAME);
-        const { peerId, producerId } = req.body;
+        const { peerId, producerId, roomId } = req.body;
+        const room = await mediaApp.getRoom(roomId);
         const peer = room.findPeer(peerId);
         res.send(await peer.resumeProducer(producerId));
       } catch (e) {
@@ -287,26 +263,11 @@ async function main() {
 
   console.log('starting mediasoup');
   const mediaApp = new MediaApp();
-  mediaApp.createNewRoom(TESTROOMNAME);
-  const room = mediaApp.getRoom(TESTROOMNAME);
-  // room.router.observer.on();
-  const worker = await mediaApp.createWorker();
-  const { mediaCodecs } = config.mediasoup.router;
-  const router = await worker.createRouter({ mediaCodecs });
-  await room.createRouterAndObserver(router);
+
   const server = new Server(mediaApp);
   // start https server, falling back to http if https fails
   console.log('starting express');
   await server.run();
-
-  // periodically clean up peers that disconnected without sending us
-  // a final "beacon"
-  setInterval(() => {
-    room.deleteTimeOutedPeers();
-  }, 1000);
-
-  // periodically update video stats we're sending to peers
-  setInterval(room.updatePeerStats, 3000);
 }
 
 main();

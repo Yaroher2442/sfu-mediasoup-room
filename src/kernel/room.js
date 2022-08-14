@@ -118,7 +118,7 @@ class Room {
     //
     const peer = this.peers[peerId];
     if (!peer) {
-      throw Error('peer not found');
+      return { left: true };
     }
     await peer.close();
     delete this.peers[peerId];

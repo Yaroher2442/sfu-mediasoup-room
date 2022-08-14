@@ -29,6 +29,7 @@ export let currentActiveSpeaker = {};
 export let lastPollSyncData = {};
 export let consumers = [];
 export let pollingInterval;
+export let roomId;
 
 //
 // our "signaling" function -- just an http fetch
@@ -37,13 +38,12 @@ export let pollingInterval;
 async function sig(endpoint, data, beacon, peerId = myPeerId) {
   try {
     const headers = { 'Content-Type': 'application/json' };
-    const body = JSON.stringify({ ...data, peerId });
+    const body = JSON.stringify({ ...data, peerId, roomId });
 
     if (beacon) {
       navigator.sendBeacon(`/signaling/${endpoint}`, body);
       return null;
     }
-
     const response = await fetch(`/signaling/${endpoint}`, { method: 'POST', body, headers });
     return await response.json();
   } catch (e) {
@@ -58,7 +58,9 @@ async function sig(endpoint, data, beacon, peerId = myPeerId) {
 
 export async function main() {
   console.log(`starting up ... my peerId is ${myPeerId}`);
-  console.log(window.location);
+  const id = window.location.pathname.replaceAll('/', '');
+  roomId = id;
+  console.log(roomId);
   try {
     device = new mediasoup.Device();
   } catch (e) {
@@ -89,7 +91,7 @@ export async function joinRoom() {
   try {
     // signal that we're a new peer and initialize our
     // mediasoup-client device, if this is our first time connecting
-    const { routerRtpCapabilities } = await sig('join-as-new-peer');
+    const { routerRtpCapabilities } = await sig('join');
     if (!device.loaded) {
       await device.load({ routerRtpCapabilities });
     }
