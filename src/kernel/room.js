@@ -180,7 +180,6 @@ class Room {
     }
 
     const allTransports = { ...senderPeer.transports, ...targetPeer.transports };
-    console.log(allTransports);
     let targetTransport;
     Object.values(allTransports).forEach((trans) => {
       if (trans.appData.peerId === peerId && trans.appData.clientDirection === 'recv') {

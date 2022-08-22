@@ -109,6 +109,10 @@ class Peer {
     // to create a transport object on the client side
     //
     const transport = await this.room.createWebRtcTransport({ peerId: this.id, direction });
+    console.log('aaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    // transport.observer.on('close', () => {
+    //   console.log('ROROROROROOROROROROROR');
+    // });
     this.transports[transport.id] = transport;
 
     const {

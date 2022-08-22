@@ -1,6 +1,6 @@
 import builtins from 'rollup-plugin-node-builtins';
 import resolve from 'rollup-plugin-node-resolve';
-import commonJS from 'rollup-plugin-commonjs'
+import commonJS from 'rollup-plugin-commonjs';
 import json from 'rollup-plugin-json';
 
 export default [
@@ -10,17 +10,17 @@ export default [
       file: 'src/static/client-bundle.js',
       name: 'Client',
       format: 'iife',
-      sourcemap: 'inline'
+      sourcemap: 'inline',
     }],
     plugins: [
       json(),
       builtins(),
       resolve({
-        browser: true
+        browser: true,
       }),
       commonJS({
-        include: ['node_modules/**','src/configold.js']
+        include: ['node_modules/**', 'src/config.js'],
       }),
-    ]
-  }
+    ],
+  },
 ];

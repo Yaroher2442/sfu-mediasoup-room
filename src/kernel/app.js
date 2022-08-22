@@ -33,9 +33,10 @@ class MediaApp {
     await room.createRouterAndObserver(router);
     // periodically clean up peers that disconnected without sending us
     // a final "beacon"
-    setInterval(() => {
-      room.deleteTimeOutedPeers();
-    }, 1000);
+    // TODO create this with sse
+    // setInterval(() => {
+    //   room.deleteTimeOutedPeers();
+    // }, 1000);
 
     // periodically update video stats we're sending to peers
     setInterval(room.updatePeerStats, 3000);

@@ -7,13 +7,15 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "tsc --project ./",
     "rollup": "npx rollup -c",
-    "start": "NODE_ENV=dev DEBUG=* node ./src/index.js"
+    "start": "NODE_ENV=dev DEBUG=* node ./src/server.js",
+    "start_with_build": "npm run build && npm run rollup && npm run start"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Yaroher2442/sfu-mediasoup-room.git"
   },
   "dependencies": {
+    "axios": "^0.27.2",
     "cors": "^2.8.5",
     "deep-equal": "^1.0.1",
     "express": "^4.16.4",

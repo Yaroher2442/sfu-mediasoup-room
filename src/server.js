@@ -1,4 +1,3 @@
-const mediasoup = require('mediasoup');
 const express = require('express');
 const https = require('https');
 const fs = require('fs');
@@ -9,12 +8,17 @@ const MediaApp = require('./kernel/app');
 class Server {
   expressApp = express();
 
-  v;
-
   mediaApp;
+
+  sse;
 
   constructor(mediaApp) {
     this.mediaApp = mediaApp;
+    // TODO create sse with events
+    // this.sse = new SSE();
+    // this.expressApp.set('sse', this.sse);
+    // this.expressApp.get('/events', this.sse.init);
+
     this.expressApp.set('mediaApp', mediaApp);
     this.expressApp.use(cors());
     this.expressApp.use(express.json({ type: '*/*' }));
